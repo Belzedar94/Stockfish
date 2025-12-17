@@ -43,12 +43,18 @@ static_assert((PAWN_HISTORY_SIZE & (PAWN_HISTORY_SIZE - 1)) == 0,
 
 static_assert((UINT_16_HISTORY_SIZE & (UINT_16_HISTORY_SIZE - 1)) == 0,
               "CORRECTION_HISTORY_SIZE has to be a power of 2");
+static_assert(UINT_16_HISTORY_SIZE - 1 <= std::numeric_limits<uint16_t>::max(),
+              "CORRECTION_HISTORY_SIZE does not fit in 16 bits");
 
 inline int pawn_history_index(const Position& pos) {
     return pos.pawn_key() & (PAWN_HISTORY_SIZE - 1);
 }
 
 inline uint16_t pawn_correction_history_index(const Position& pos) { return pos.pawn_key(); }
+
+inline uint16_t corr_tag(Key k) {
+    return uint16_t((k >> 48) ^ (k >> 32) ^ (k >> 16));
+}
 
 inline uint16_t minor_piece_index(const Position& pos) { return pos.minor_piece_key(); }
 
@@ -159,6 +165,17 @@ template<CorrHistType T>
 using CorrectionHistory = typename Detail::CorrHistTypedef<T>::type;
 
 using TTMoveHistory = StatsEntry<std::int16_t, 8192>;
+
+struct CorrectionHistories {
+    CorrectionHistory<Pawn>         pawn;
+    CorrectionHistory<Minor>        minor;
+    CorrectionHistory<NonPawn>      nonPawn;
+    CorrectionHistory<Continuation> continuation;
+
+    std::array<uint16_t, UINT_16_HISTORY_SIZE>            pawnCorrTag;
+    std::array<uint16_t, UINT_16_HISTORY_SIZE>            minorCorrTag;
+    std::array<std::array<uint16_t, UINT_16_HISTORY_SIZE>, COLOR_NB> nonPawnCorrTag;
+};
 
 }  // namespace Stockfish
 

@@ -32,6 +32,7 @@
 #include <utility>
 
 #include "bitboard.h"
+#include "history.h"
 #include "misc.h"
 #include "movegen.h"
 #include "syzygy/tbprobe.h"
@@ -49,6 +50,10 @@ Key enpassant[FILE_NB];
 Key castling[CASTLING_RIGHT_NB];
 Key side, noPawns;
 
+}
+
+constexpr uint16_t Position::corrHistSizeM1() const {
+    return UINT_16_HISTORY_SIZE - 1;
 }
 
 namespace {
@@ -698,7 +703,8 @@ void Position::do_move(Move                      m,
                        bool                      givesCheck,
                        DirtyPiece&               dp,
                        DirtyThreats&             dts,
-                       const TranspositionTable* tt = nullptr) {
+                       const TranspositionTable* tt,
+                       const CorrectionHistories* correctionHistories) {
 
     assert(m.is_ok());
     assert(&newSt != st);
@@ -879,6 +885,20 @@ void Position::do_move(Move                      m,
     // If en passant is impossible, then k will not change and we can prefetch earlier
     if (tt && !checkEP)
         prefetch(tt->first_entry(adjust_key50(k)));
+
+    if (correctionHistories)
+    {
+        const auto corrMask = corrHistSizeM1();
+        const auto pawnIdx  = st->pawnKey & corrMask;
+        const auto minorIdx = st->minorPieceKey & corrMask;
+        const auto whiteIdx = st->nonPawnKey[WHITE] & corrMask;
+        const auto blackIdx = st->nonPawnKey[BLACK] & corrMask;
+
+        prefetch(&correctionHistories->pawnCorrTag[pawnIdx]);
+        prefetch(&correctionHistories->minorCorrTag[minorIdx]);
+        prefetch(&correctionHistories->nonPawnCorrTag[WHITE][whiteIdx]);
+        prefetch(&correctionHistories->nonPawnCorrTag[BLACK][blackIdx]);
+    }
 
     // Set capture piece
     st->capturedPiece = captured;

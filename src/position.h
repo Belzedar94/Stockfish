@@ -25,6 +25,7 @@
 #include <iosfwd>
 #include <memory>
 #include <new>
+#include <cstdint>
 #include <string>
 
 #include "bitboard.h"
@@ -33,6 +34,7 @@
 namespace Stockfish {
 
 class TranspositionTable;
+struct CorrectionHistories;
 
 // StateInfo struct stores information needed to restore a Position object to
 // its previous state when we retract a move. Whenever a move is made on the
@@ -134,13 +136,15 @@ class Position {
     Piece captured_piece() const;
 
     // Doing and undoing moves
-    void do_move(Move m, StateInfo& newSt, const TranspositionTable* tt);
+    void do_move(Move m, StateInfo& newSt, const TranspositionTable* tt = nullptr,
+                 const CorrectionHistories* correctionHistories = nullptr);
     void do_move(Move                      m,
                  StateInfo&                newSt,
                  bool                      givesCheck,
                  DirtyPiece&               dp,
                  DirtyThreats&             dts,
-                 const TranspositionTable* tt);
+                 const TranspositionTable* tt,
+                 const CorrectionHistories* correctionHistories = nullptr);
     void undo_move(Move m);
     void do_null_move(StateInfo& newSt, const TranspositionTable& tt);
     void undo_null_move();
@@ -166,6 +170,7 @@ class Position {
     int   rule50_count() const;
     Value non_pawn_material(Color c) const;
     Value non_pawn_material() const;
+    constexpr uint16_t corrHistSizeM1() const;
 
     // Position consistency check, for debugging
     bool pos_is_ok() const;
@@ -401,9 +406,12 @@ inline void Position::swap_piece(Square s, Piece pc, DirtyThreats* const dts) {
         update_piece_threats<true, false>(pc, s, dts);
 }
 
-inline void Position::do_move(Move m, StateInfo& newSt, const TranspositionTable* tt = nullptr) {
+inline void Position::do_move(Move                      m,
+                              StateInfo&                newSt,
+                              const TranspositionTable* tt,
+                              const CorrectionHistories* correctionHistories) {
     new (&scratch_dts) DirtyThreats;
-    do_move(m, newSt, gives_check(m), scratch_dp, scratch_dts, tt);
+    do_move(m, newSt, gives_check(m), scratch_dp, scratch_dts, tt, correctionHistories);
 }
 
 inline StateInfo* Position::state() const { return st; }

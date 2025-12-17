@@ -54,6 +54,11 @@ namespace Stockfish {
 
 namespace TB = Tablebases;
 
+constexpr int PawnCorrDefault   = 5;
+constexpr int MinorCorrDefault  = 0;
+constexpr int NonPawnCorrDefault = 0;
+constexpr int ContCorrDefault   = 8;
+
 void syzygy_extend_pv(const OptionsMap&            options,
                       const Search::LimitsType&    limits,
                       Stockfish::Position&         pos,
@@ -79,14 +84,38 @@ using SearchedList                  = ValueList<Move, SEARCHEDLIST_CAPACITY>;
 int correction_value(const Worker& w, const Position& pos, const Stack* const ss) {
     const Color us    = pos.side_to_move();
     const auto  m     = (ss - 1)->currentMove;
-    const auto  pcv   = w.pawnCorrectionHistory[pawn_correction_history_index(pos)][us];
-    const auto  micv  = w.minorPieceCorrectionHistory[minor_piece_index(pos)][us];
-    const auto  wnpcv = w.nonPawnCorrectionHistory[non_pawn_index<WHITE>(pos)][WHITE][us];
-    const auto  bnpcv = w.nonPawnCorrectionHistory[non_pawn_index<BLACK>(pos)][BLACK][us];
+    const Key   pawnKey = pos.pawn_key();
+    const Key   minorKey = pos.minor_piece_key();
+    const Key   whiteKey = pos.non_pawn_key(WHITE);
+    const Key   blackKey = pos.non_pawn_key(BLACK);
+    const auto  corrMask = pos.corrHistSizeM1();
+
+    const auto pawnIdx = pawnKey & corrMask;
+    const auto minorIdx = minorKey & corrMask;
+    const auto whiteIdx = whiteKey & corrMask;
+    const auto blackIdx = blackKey & corrMask;
+
+    const auto pawnTag  = corr_tag(pawnKey);
+    const auto minorTag = corr_tag(minorKey);
+    const auto whiteTag = corr_tag(whiteKey);
+    const auto blackTag = corr_tag(blackKey);
+
+    const auto pcv = w.correctionHistories.pawnCorrTag[pawnIdx] == pawnTag
+                   ? w.correctionHistories.pawn[pawnIdx][us]
+                   : PawnCorrDefault;
+    const auto micv = w.correctionHistories.minorCorrTag[minorIdx] == minorTag
+                    ? w.correctionHistories.minor[minorIdx][us]
+                    : MinorCorrDefault;
+    const auto wnpcv = w.correctionHistories.nonPawnCorrTag[WHITE][whiteIdx] == whiteTag
+                     ? w.correctionHistories.nonPawn[whiteIdx][WHITE][us]
+                     : NonPawnCorrDefault;
+    const auto bnpcv = w.correctionHistories.nonPawnCorrTag[BLACK][blackIdx] == blackTag
+                     ? w.correctionHistories.nonPawn[blackIdx][BLACK][us]
+                     : NonPawnCorrDefault;
     const auto  cntcv =
       m.is_ok() ? (*(ss - 2)->continuationCorrectionHistory)[pos.piece_on(m.to_sq())][m.to_sq()]
                     + (*(ss - 4)->continuationCorrectionHistory)[pos.piece_on(m.to_sq())][m.to_sq()]
-                 : 8;
+                 : ContCorrDefault;
 
     return 10347 * pcv + 8821 * micv + 11168 * (wnpcv + bnpcv) + 7841 * cntcv;
 }
@@ -106,12 +135,57 @@ void update_correction_history(const Position& pos,
 
     constexpr int nonPawnWeight = 178;
 
-    workerThread.pawnCorrectionHistory[pawn_correction_history_index(pos)][us] << bonus;
-    workerThread.minorPieceCorrectionHistory[minor_piece_index(pos)][us] << bonus * 156 / 128;
-    workerThread.nonPawnCorrectionHistory[non_pawn_index<WHITE>(pos)][WHITE][us]
-      << bonus * nonPawnWeight / 128;
-    workerThread.nonPawnCorrectionHistory[non_pawn_index<BLACK>(pos)][BLACK][us]
-      << bonus * nonPawnWeight / 128;
+    const Key pawnKey  = pos.pawn_key();
+    const Key minorKey = pos.minor_piece_key();
+    const Key whiteKey = pos.non_pawn_key(WHITE);
+    const Key blackKey = pos.non_pawn_key(BLACK);
+
+    const auto corrMask = pos.corrHistSizeM1();
+
+    const auto pawnIdx  = pawnKey & corrMask;
+    const auto minorIdx = minorKey & corrMask;
+    const auto whiteIdx = whiteKey & corrMask;
+    const auto blackIdx = blackKey & corrMask;
+
+    const auto pawnTag  = corr_tag(pawnKey);
+    const auto minorTag = corr_tag(minorKey);
+    const auto whiteTag = corr_tag(whiteKey);
+    const auto blackTag = corr_tag(blackKey);
+
+    auto& corrHistories = workerThread.correctionHistories;
+
+    if (corrHistories.pawnCorrTag[pawnIdx] != pawnTag)
+    {
+        corrHistories.pawnCorrTag[pawnIdx] = pawnTag;
+        corrHistories.pawn[pawnIdx][WHITE] = PawnCorrDefault;
+        corrHistories.pawn[pawnIdx][BLACK] = PawnCorrDefault;
+    }
+
+    if (corrHistories.minorCorrTag[minorIdx] != minorTag)
+    {
+        corrHistories.minorCorrTag[minorIdx] = minorTag;
+        corrHistories.minor[minorIdx][WHITE] = MinorCorrDefault;
+        corrHistories.minor[minorIdx][BLACK] = MinorCorrDefault;
+    }
+
+    if (corrHistories.nonPawnCorrTag[WHITE][whiteIdx] != whiteTag)
+    {
+        corrHistories.nonPawnCorrTag[WHITE][whiteIdx] = whiteTag;
+        corrHistories.nonPawn[whiteIdx][WHITE][WHITE] = NonPawnCorrDefault;
+        corrHistories.nonPawn[whiteIdx][WHITE][BLACK] = NonPawnCorrDefault;
+    }
+
+    if (corrHistories.nonPawnCorrTag[BLACK][blackIdx] != blackTag)
+    {
+        corrHistories.nonPawnCorrTag[BLACK][blackIdx] = blackTag;
+        corrHistories.nonPawn[blackIdx][BLACK][WHITE] = NonPawnCorrDefault;
+        corrHistories.nonPawn[blackIdx][BLACK][BLACK] = NonPawnCorrDefault;
+    }
+
+    corrHistories.pawn[pawnIdx][us] << bonus;
+    corrHistories.minor[minorIdx][us] << bonus * 156 / 128;
+    corrHistories.nonPawn[whiteIdx][WHITE][us] << bonus * nonPawnWeight / 128;
+    corrHistories.nonPawn[blackIdx][BLACK][us] << bonus * nonPawnWeight / 128;
 
     if (m.is_ok())
     {
@@ -277,7 +351,7 @@ void Search::Worker::iterative_deepening() {
     {
         (ss - i)->continuationHistory =
           &continuationHistory[0][0][NO_PIECE][0];  // Use as a sentinel
-        (ss - i)->continuationCorrectionHistory = &continuationCorrectionHistory[NO_PIECE][0];
+        (ss - i)->continuationCorrectionHistory = &correctionHistories.continuation[NO_PIECE][0];
         (ss - i)->staticEval                    = VALUE_NONE;
     }
 
@@ -545,7 +619,7 @@ void Search::Worker::do_move(
     nodes.store(nodes.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
 
     auto [dirtyPiece, dirtyThreats] = accumulatorStack.push();
-    pos.do_move(move, st, givesCheck, dirtyPiece, dirtyThreats, &tt);
+    pos.do_move(move, st, givesCheck, dirtyPiece, dirtyThreats, &tt, &correctionHistories);
 
     if (ss != nullptr)
     {
@@ -553,7 +627,7 @@ void Search::Worker::do_move(
         ss->continuationHistory =
           &continuationHistory[ss->inCheck][capture][dirtyPiece.pc][move.to_sq()];
         ss->continuationCorrectionHistory =
-          &continuationCorrectionHistory[dirtyPiece.pc][move.to_sq()];
+          &correctionHistories.continuation[dirtyPiece.pc][move.to_sq()];
     }
 }
 
@@ -561,7 +635,7 @@ void Search::Worker::do_null_move(Position& pos, StateInfo& st, Stack* const ss)
     pos.do_null_move(st, tt);
     ss->currentMove                   = Move::null();
     ss->continuationHistory           = &continuationHistory[0][0][NO_PIECE][0];
-    ss->continuationCorrectionHistory = &continuationCorrectionHistory[NO_PIECE][0];
+    ss->continuationCorrectionHistory = &correctionHistories.continuation[NO_PIECE][0];
 }
 
 void Search::Worker::undo_move(Position& pos, const Move move) {
@@ -577,15 +651,19 @@ void Search::Worker::clear() {
     mainHistory.fill(68);
     captureHistory.fill(-689);
     pawnHistory.fill(-1238);
-    pawnCorrectionHistory.fill(5);
-    minorPieceCorrectionHistory.fill(0);
-    nonPawnCorrectionHistory.fill(0);
+    correctionHistories.pawn.fill(PawnCorrDefault);
+    correctionHistories.minor.fill(MinorCorrDefault);
+    correctionHistories.nonPawn.fill(NonPawnCorrDefault);
+    correctionHistories.pawnCorrTag.fill(0);
+    correctionHistories.minorCorrTag.fill(0);
+    for (auto& tags : correctionHistories.nonPawnCorrTag)
+        tags.fill(0);
 
     ttMoveHistory = 0;
 
-    for (auto& to : continuationCorrectionHistory)
+    for (auto& to : correctionHistories.continuation)
         for (auto& h : to)
-            h.fill(8);
+            h.fill(ContCorrDefault);
 
     for (bool inCheck : {false, true})
         for (StatsType c : {NoCaptures, Captures})
