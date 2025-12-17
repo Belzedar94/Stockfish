@@ -286,10 +286,7 @@ class Worker {
     ContinuationHistory   continuationHistory[2][2];
     PawnHistory           pawnHistory;
 
-    CorrectionHistory<Pawn>         pawnCorrectionHistory;
-    CorrectionHistory<Minor>        minorPieceCorrectionHistory;
-    CorrectionHistory<NonPawn>      nonPawnCorrectionHistory;
-    CorrectionHistory<Continuation> continuationCorrectionHistory;
+    CorrectionHistories correctionHistories;
 
     TTMoveHistory ttMoveHistory;
 
