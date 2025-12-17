@@ -52,6 +52,10 @@ Key side, noPawns;
 
 }
 
+constexpr uint16_t Position::corrHistSizeM1() const {
+    return UINT_16_HISTORY_SIZE - 1;
+}
+
 namespace {
 
 constexpr std::string_view PieceToChar(" PNBRQK  pnbrqk");

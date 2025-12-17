@@ -416,10 +416,6 @@ inline void Position::do_move(Move                      m,
 
 inline StateInfo* Position::state() const { return st; }
 
-constexpr uint16_t Position::corrHistSizeM1() const {
-    return UINT16_MAX;
-}
-
 }  // namespace Stockfish
 
 #endif  // #ifndef POSITION_H_INCLUDED
